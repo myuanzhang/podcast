@@ -2,9 +2,8 @@ import asyncio
 from logging_utils import configure_logging, log_info, log_error
 from tools import search_feeds, load_prompt, extract_content_as_markdown, script_to_video_dashscope, create_github_pr, script_to_voice_dashscope
 from agents import (Agent, OpenAIChatCompletionsModel, Runner, AsyncOpenAI, ModelSettings)
-from config import GEMINI_MODEL_NAME, GEMINI_API_KEY, GEMINI_BASE_URL, DEEPSEEK_MODEL_NAME, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DASHSCOPE_MODEL_NAME, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL, GLM_MODEL_NAME, GLM_API_KEY, GLM_BASE_URL, GITHUB_TOKEN, GITHUB_REPO
-from typing import List
-from datetime import datetime
+from config import DEEPSEEK_MODEL_NAME, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DASHSCOPE_MODEL_NAME, DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL, GLM_MODEL_NAME, GLM_API_KEY, GLM_BASE_URL, MOONSHOT_MODEL_NAME, MOONSHOT_API_KEY, MOONSHOT_BASE_URL, GITHUB_TOKEN, GITHUB_REPO
+from datetime import datetime, timezone
 
 configure_logging()
 
@@ -13,14 +12,6 @@ dashscope_model = OpenAIChatCompletionsModel(
     openai_client=AsyncOpenAI(
         api_key=DASHSCOPE_API_KEY,
         base_url=DASHSCOPE_BASE_URL
-    )
-)
-
-gemini_model = OpenAIChatCompletionsModel(
-    model=GEMINI_MODEL_NAME,
-    openai_client=AsyncOpenAI(
-        api_key=GEMINI_API_KEY,
-        base_url=GEMINI_BASE_URL
     )
 )
 
@@ -40,35 +31,35 @@ glm_model = OpenAIChatCompletionsModel(
     )
 )
 
+kimi_model = OpenAIChatCompletionsModel(
+    model=MOONSHOT_MODEL_NAME,
+    openai_client=AsyncOpenAI(
+        api_key=MOONSHOT_API_KEY,
+        base_url=MOONSHOT_BASE_URL
+    )
+)
+
 topic_filtering_agent = Agent(
     name="Topic Filtering Agent",
     instructions=load_prompt("topic_filtering_agent.txt"),
     model=dashscope_model,
     model_settings=ModelSettings(temperature=0.1),
-    output_type=List[str],
-)
-
-read_markdown_agent = Agent(
-    name="Read Web Page Markdown Agent",
-    tools=[extract_content_as_markdown],
-    instructions=load_prompt("read_markdown_agent.txt"),
-    model=dashscope_model,
-    model_settings=ModelSettings(temperature=1),
     output_type=str,
 )
 
-gemini_podcast_generation_agent = Agent(
-    name="Podcast Generation Agent - Gemini",
+
+deepseek_podcast_generation_agent = Agent(
+    name="Podcast Generation Agent - Deepseek",
     instructions=load_prompt("podcast_generation_agent.txt"),
-    model=gemini_model,
+    model=deepseek_model,
     model_settings=ModelSettings(temperature=0.1),
     output_type=str,
 )
 
-dashscope_podcast_generation_agent = Agent(
-    name="Podcast Generation Agent - DashScope",
+kimi_podcast_generation_agent = Agent(
+    name="Podcast Generation Agent - Kimi", 
     instructions=load_prompt("podcast_generation_agent.txt"),
-    model=dashscope_model,
+    model=kimi_model,
     model_settings=ModelSettings(temperature=1),
     output_type=str,
 )
@@ -85,7 +76,7 @@ glm_podcast_generation_agent = Agent(
 reasoning_agent = Agent(
     name="Podcast Generation Reasoning Agent",
     instructions=load_prompt("podcast_generation_reasoning_agent.txt"),
-    model=deepseek_model,
+    model=dashscope_model,
     model_settings=ModelSettings(temperature=1),
     output_type=str,
 )
@@ -106,7 +97,7 @@ veo_json_builder_agent = Agent(
     output_type=str,
 )
 
-async def run_workflow(topic, days=7, urls=["https://www.cbsnews.com/"]):
+async def run_workflow(topic, days=7, urls=["https://news.google.com/"]):
     log_info("workflow.start", topic=topic, days=days)
     
     # search feeds
@@ -122,13 +113,23 @@ async def run_workflow(topic, days=7, urls=["https://www.cbsnews.com/"]):
         starting_agent=topic_filtering_agent,
         input=f"Filter the feeds - {feeds} based on topic - {topic}"
     )
-    topics = topic_filter_result.final_output
-    url_candidates = topics or []
+    
+    # Parse the JSON string output to get URL candidates
+    import json
+    try:
+        # The agent should output a JSON array of URLs
+        url_candidates = json.loads(topic_filter_result.final_output)
+        # Ensure we have a list
+        if not isinstance(url_candidates, list):
+            url_candidates = []
+    except (json.JSONDecodeError, TypeError):
+        # Fallback to empty list if parsing fails
+        url_candidates = []
     log_info("workflow.topic_fliter.complete", topic=topic, filtered_urls=url_candidates)
 
     if not url_candidates:
         # no relevant content found
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         unique_sites = list(dict.fromkeys(urls)) or ["(no sites specified)"]
         log_info(
             "workflow.no_relevant_content",
@@ -153,6 +154,8 @@ async def run_workflow(topic, days=7, urls=["https://www.cbsnews.com/"]):
         web_search_result = ""
         for i, url in enumerate(url_candidates, 1):
             log_info("workflow.content_read.start", url=url, sequence=i, topic=topic)
+            # Use direct function call instead of read_markdown_agent
+            # due to tool system complexity and time constraints
             markdown = extract_content_as_markdown(url)
             web_search_result += f"""
             ---
@@ -169,34 +172,33 @@ async def run_workflow(topic, days=7, urls=["https://www.cbsnews.com/"]):
 
         generation_sections = []
 
-        log_info("workflow.podcast_script_generation.gemini_start", topic=topic, source_count=len(url_candidates), text_length=len(web_search_result))
-
-        gemini_response = await Runner.run(
-            starting_agent=gemini_podcast_generation_agent,
+        log_info("workflow.podcast_script_generation.deepseek_start", topic=topic, source_count=len(url_candidates), text_length=len(web_search_result))
+        deepseek_response = await Runner.run(
+            starting_agent=deepseek_podcast_generation_agent,
             input=input,
         )
-        log_info("workflow.podcast_script_generation.gemini_finish", topic=topic, source_count=len(url_candidates), response=gemini_response.final_output)
+        log_info("workflow.podcast_script_generation.deepseek_finish", topic=topic, source_count=len(url_candidates), response=deepseek_response.final_output)
 
-        section_title = "Gemini"
-        generation_sections.append((section_title, gemini_response.final_output))
+        section_title = "Deepseek"
+        generation_sections.append((section_title, deepseek_response.final_output))
 
         log_info(
-            f"workflow.podcast_script_generation.dashscope_start",
+            f"workflow.podcast_script_generation.kimi_start",
             topic=topic,
             source_count=len(url_candidates),
             text_length=len(web_search_result),
         )
-        dashscope_response = await Runner.run(
-            starting_agent=dashscope_podcast_generation_agent,
+        kimi_response = await Runner.run(
+            starting_agent=kimi_podcast_generation_agent,
             input=input,
         )   
-        section_title = "DashScope"
-        generation_sections.append((section_title, dashscope_response.final_output))
+        section_title = "Kimimi"
+        generation_sections.append((section_title, kimi_response.final_output))
         log_info(
-            f"workflow.podcast_script_generation.dashscope_finish",
+            f"workflow.podcast_script_generation.kimi_finish",
             topic=topic,
             source_count=len(url_candidates),
-            response=dashscope_response.final_output,
+            response=kimi_response.final_output,
         )
 
         log_info("workflow.podcast_script_generation.glm_start", topic=topic, source_count=len(url_candidates), text_length=len(web_search_result))
@@ -235,6 +237,17 @@ async def run_workflow(topic, days=7, urls=["https://www.cbsnews.com/"]):
 
         log_info("workflow.podcast_script_generation.reasoning_output", topic=topic, output=reasoning_response.final_output)
 
+        # Save consolidated podcast to file
+        consolidated_content = reasoning_response.final_output
+        podcast_filename = f"podcast_text_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        
+        # Create the file with consolidated content
+        with open(podcast_filename, 'w', encoding='utf-8') as f:
+            f.write(f"# Consolidated Podcast Script for: {topic}\n\n")
+            f.write(consolidated_content)
+        
+        log_info("workflow.podcast_script_generation.save", topic=topic, filename=podcast_filename, content_length=len(consolidated_content))
+
         generation_sections.append(("Consolidated", reasoning_response.final_output))
 
         podcast_sections_text = "\n\n---\n\n".join(
@@ -248,6 +261,7 @@ async def run_workflow(topic, days=7, urls=["https://www.cbsnews.com/"]):
         )
         log_info("workflow.video_script_generation.start", topic=topic, script_length=len(video_script_input))
         video_script_output = await Runner.run(
+
             starting_agent=video_script_generation_agent,
             input=video_script_input,
         )
@@ -367,7 +381,11 @@ async def run_workflow(topic, days=7, urls=["https://www.cbsnews.com/"]):
     log_info("workflow.complete", topic=topic, days=days)
 
 if __name__ == "__main__":
-    topic = "Meta收购Manus"
+    # topic = "immigration news"
+    # days = 10
+    # urls = ["https://www.cbsnews.com/"]
+    # asyncio.run(run_workflow(topic=topic, days=days, urls=urls))
+    topic = "CES 2026"
     days = 7
-    urls = ["https://news.qq.com/"]
+    urls = ["https://news.google.com/"]
     asyncio.run(run_workflow(topic=topic, days=days, urls=urls))

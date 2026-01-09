@@ -1,18 +1,15 @@
 import base64
-import os
 
 import feedfinder2, feedparser, datetime as dt, time
 import requests
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from urllib.parse import urljoin, urlparse, urldefrag, urlunparse
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import pandas as pd
-
-from agents import function_tool
 
 
 from logging_utils import configure_logging, log_error, log_info
@@ -492,9 +489,7 @@ def script_to_voice_dashscope(text: str, filename: str) -> str:
     return f"Audio content saved to {speech_file_path}"
 
 
-
-
-def script_to_video_dashscope(veo_json_str: str, filename: str = "update.mp4", size: str = "832*480", duration: int = 8, prompt_extend: bool = True, shot_type: str = "multi") -> str:
+def script_to_video_dashscope(veo_json_str: str, filename: str = "update.mp4", size: str = "1920*1080", duration: int = 8, prompt_extend: bool = True, shot_type: str = "multi") -> str:
     """
     Accepts a JSON string (Veo structured prompt), generates a video using Alibaba Cloud DashScope's Text-to-Video API,
     and saves it to the specified filename.
@@ -674,15 +669,22 @@ def create_github_pr(
     }
     r = requests.put(url, headers=headers, json=data)
     if r.status_code not in (200, 201):
+        error_message = r.text
+        # Add specific guidance for common 403 errors
+        if r.status_code == 403:
+            if "Resource not accessible by personal access token" in error_message:
+                error_message += "\n\n建议解决方案：请确保您的GitHub个人访问令牌具有'repo'权限范围，并且令牌未过期。"
+            elif "Bad credentials" in error_message:
+                error_message += "\n\n建议解决方案：请检查您的GitHub令牌是否有效，可能已过期或格式错误。"
         log_error(
             "github.pr.commit",
             repo=repo,
             branch=branch,
             file_name=file_name,
             status_code=r.status_code,
-            response=r.text,
+            response=error_message,
         )
-        return {"success": False, "pr_url": "", "branch": branch, "message": f"Failed to commit file: {r.text}"}
+        return {"success": False, "pr_url": "", "branch": branch, "message": f"Failed to commit file: {error_message}"}
 
     # 5) Open PR
     pr_url = f"https://api.github.com/repos/{repo}/pulls"
@@ -694,15 +696,22 @@ def create_github_pr(
     }
     r = requests.post(pr_url, headers=headers, json=pr_data)
     if r.status_code not in (200, 201):
+        error_message = r.text
+        # Add specific guidance for common 403 errors
+        if r.status_code == 403:
+            if "Resource not accessible by personal access token" in error_message:
+                error_message += "\n\n建议解决方案：请确保您的GitHub个人访问令牌具有'repo'权限范围，并且令牌未过期。"
+            elif "Bad credentials" in error_message:
+                error_message += "\n\n建议解决方案：请检查您的GitHub令牌是否有效，可能已过期或格式错误。"
         log_error(
             "github.pr.create",
             repo=repo,
             branch=branch,
             file_name=file_name,
             status_code=r.status_code,
-            response=r.text,
+            response=error_message,
         )
-        return {"success": False, "pr_url": "", "branch": branch, "message": f"Failed to create PR: {r.text}"}
+        return {"success": False, "pr_url": "", "branch": branch, "message": f"Failed to create PR: {error_message}"}
 
     pr_response = r.json()
     log_info(
@@ -752,7 +761,7 @@ if __name__ == "__main__":
         video_result = script_to_video_dashscope(
             test_veo_json_str, 
             "test_video.mp4",
-            size="832*480",
+            size="1920*1080",
             duration=10,
             prompt_extend=True,
             shot_type="multi"
