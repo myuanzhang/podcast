@@ -97,14 +97,27 @@ veo_json_builder_agent = Agent(
     output_type=str,
 )
 
-async def run_workflow(topic, days=7, urls=["https://news.google.com/"]):
+async def run_workflow(topic, days=7, urls=None):
+    # If no URLs provided, use Google News search RSS for the topic
+    if urls is None:
+        # Format topic for URL
+        import urllib.parse
+        encoded_topic = urllib.parse.quote(topic)
+        # Use Google News search RSS feed
+        urls = [f"https://news.google.com/rss/search?q={encoded_topic}&hl=en-US&gl=US&ceid=US:en"]
+        log_info("workflow.feed_search.using_topic_rss", topic=topic, rss_url=urls[0])
     log_info("workflow.start", topic=topic, days=days)
     
     # search feeds
     log_info("workflow.feed_search", topic=topic, urls=urls)
     feeds = []
     for url in urls:
-        feeds += search_feeds(url, days=days, max_pages=10, verbose=True)
+        url_feeds = search_feeds(url, days=days, max_pages=10, verbose=True)
+        feeds += url_feeds
+        # Log the number of feeds found for each URL
+        log_info("workflow.feed_search.url", url=url, feeds_count=len(url_feeds))
+    # Log the first few feeds to debug
+    log_info("workflow.feed_search.debug", topic=topic, total_feeds=len(feeds), sample_feeds=feeds[:3])
     log_info("workflow.feed_search.complete", topic=topic, feeds=feeds)
 
     # topic filtering
@@ -241,12 +254,20 @@ async def run_workflow(topic, days=7, urls=["https://news.google.com/"]):
         consolidated_content = reasoning_response.final_output
         podcast_filename = f"podcast_text_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
         
-        # Create the file with consolidated content
-        with open(podcast_filename, 'w', encoding='utf-8') as f:
+        # Create artifacts directory if it doesn't exist
+        import os
+        artifacts_dir = "artifacts"
+        if not os.path.exists(artifacts_dir):
+            os.makedirs(artifacts_dir)
+            log_info("workflow.artifacts_dir.created", directory=artifacts_dir)
+        
+        # Create the file with consolidated content in artifacts directory
+        podcast_file_path = os.path.join(artifacts_dir, podcast_filename)
+        with open(podcast_file_path, 'w', encoding='utf-8') as f:
             f.write(f"# Consolidated Podcast Script for: {topic}\n\n")
             f.write(consolidated_content)
         
-        log_info("workflow.podcast_script_generation.save", topic=topic, filename=podcast_filename, content_length=len(consolidated_content))
+        log_info("workflow.podcast_script_generation.save", topic=topic, filename=podcast_file_path, content_length=len(consolidated_content))
 
         generation_sections.append(("Consolidated", reasoning_response.final_output))
 
@@ -381,11 +402,7 @@ async def run_workflow(topic, days=7, urls=["https://news.google.com/"]):
     log_info("workflow.complete", topic=topic, days=days)
 
 if __name__ == "__main__":
-    # topic = "immigration news"
-    # days = 10
-    # urls = ["https://www.cbsnews.com/"]
-    # asyncio.run(run_workflow(topic=topic, days=days, urls=urls))
     topic = "CES 2026"
     days = 7
-    urls = ["https://news.google.com/"]
-    asyncio.run(run_workflow(topic=topic, days=days, urls=urls))
+    # Don't provide urls parameter, so it will use Google News search RSS for the topic
+    asyncio.run(run_workflow(topic=topic, days=days))

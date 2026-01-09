@@ -471,7 +471,11 @@ def script_to_voice_dashscope(text: str, filename: str) -> str:
     
     # Set API key at module level
     dashscope.api_key = DASHSCOPE_API_KEY
-    speech_file_path = Path(__file__).parent / filename
+    # Create artifacts directory if it doesn't exist
+    artifacts_dir = Path(__file__).parent / "artifacts"
+    artifacts_dir.mkdir(exist_ok=True)
+    # Save audio to artifacts directory
+    speech_file_path = artifacts_dir / filename
     
     # Create speech synthesizer with default model and voice
     synthesizer = SpeechSynthesizer(
@@ -489,7 +493,7 @@ def script_to_voice_dashscope(text: str, filename: str) -> str:
     return f"Audio content saved to {speech_file_path}"
 
 
-def script_to_video_dashscope(veo_json_str: str, filename: str = "update.mp4", size: str = "1920*1080", duration: int = 8, prompt_extend: bool = True, shot_type: str = "multi") -> str:
+def script_to_video_dashscope(veo_json_str: str, filename: str = "update.mp4", size: str = "1280*720", duration: int = 15, prompt_extend: bool = True, shot_type: str = "multi") -> str:
     """
     Accepts a JSON string (Veo structured prompt), generates a video using Alibaba Cloud DashScope's Text-to-Video API,
     and saves it to the specified filename.
@@ -543,10 +547,16 @@ def script_to_video_dashscope(veo_json_str: str, filename: str = "update.mp4", s
         time.sleep(retry_interval)
         
         status_response = requests.get(task_status_url, headers=headers)
+        log_info(f"Task status response: {status_response.status_code} - {status_response.text}")
         status_data = status_response.json()
         
-        if "error" in status_data or "output" not in status_data:
-            raise Exception(f"Failed to get task status: {status_data.get('error', {}).get('message', 'Unknown error')}")
+        if "error" in status_data:
+            log_error(f"Error in status response: {status_data['error']}")
+            raise Exception(f"Failed to get task status: {status_data['error'].get('message', 'Unknown error')}")
+            
+        if "output" not in status_data:
+            log_error(f"Output not found in status response: {status_data}")
+            raise Exception(f"Failed to get task status: Output not found")
         
         task_status = status_data["output"]["task_status"]
         log_info(f"Task status check {attempt+1}/{max_retries}: {task_status}")
@@ -566,17 +576,22 @@ def script_to_video_dashscope(veo_json_str: str, filename: str = "update.mp4", s
                 raise Exception(f"Video URL not found in response: {status_data['output']}")
         elif task_status == "FAILED":
             # Get detailed error information from API response
-            error_info = status_data['output'].get('task_message', 'Unknown error')
-            # Check if there's more detailed error information in the status_data
-            if 'error' in status_data:
-                error_info = f"{error_info}: {status_data['error'].get('message', '')}"
+            log_info(f"Full task failure response: {json.dumps(status_data, ensure_ascii=False, indent=2)}")
+            error_info = status_data['output'].get('message', 'Unknown error')
+            error_code = status_data['output'].get('code', '')
+            if error_code:
+                error_info = f"{error_code}: {error_info}"
             raise Exception(f"Video generation failed: {error_info}")
     else:
         raise Exception("Video generation timed out after maximum retries")
     
     # Download the video
     video_response = requests.get(video_url)
-    video_file_path = Path(__file__).parent / filename
+    # Create artifacts directory if it doesn't exist
+    artifacts_dir = Path(__file__).parent / "artifacts"
+    artifacts_dir.mkdir(exist_ok=True)
+    # Save video to artifacts directory
+    video_file_path = artifacts_dir / filename
     
     with open(video_file_path, "wb") as f:
         f.write(video_response.content)
