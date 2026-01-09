@@ -11,4 +11,3 @@ wheels/
 
 # Environment variables
 .env
-api.py
