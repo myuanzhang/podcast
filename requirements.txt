@@ -1,0 +1,15 @@
+openai-agents
+markdownify
+requests
+flask
+flask_cors
+waitress
+feedfinder2
+feedparser
+boto3
+scrapy
+beautifulsoup4
+pandas
+playwright
+google-genai
+dashscope

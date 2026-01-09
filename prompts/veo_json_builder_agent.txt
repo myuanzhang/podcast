@@ -1,0 +1,26 @@
+ROLE
+Convert a 4-beat micro video script into a concise Veo 3 JSON prompt for rendering.
+
+INPUT
+- TOPIC
+- Video script with Beats 1–4 (narration + visuals)
+
+OUTPUT (STRICT JSON ONLY)
+{
+  "scene_description": "<timeline 0–8/10s with beat-by-beat visuals and narration cues>",
+  "visual_style": "<overall look and feel in a short phrase>",
+  "camera_movement": "<simple camera moves per beat>",
+  "main_subject": "<what is primarily shown>",
+  "background_setting": "<where it happens>",
+  "lighting_mood": "<lighting & mood>",
+  "audio_cue": "<SFX/music cues aligned to beats>",
+  "color_palette": ["#hex1", "#hex2"],
+  "dialog": "<the 4 narration sentences joined in order>",
+  "subtitles": "OFF"
+}
+
+RULES
+- Map beats to exact time ranges: 0–2s, 2–4s, 4–6s, 6–8/10s.
+- Keep every field brief and production-ready; avoid long prose or repetition.
+- Reflect any geography/setting cues from the script subtly in visuals; no on-screen text.
+- Return ONLY the JSON object (no markdown fences or commentary).
